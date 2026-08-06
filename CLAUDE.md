@@ -64,6 +64,10 @@ implementation plan to the user and get explicit approval
 first. Don't start editing on the strength of an implied
 go-ahead — wait for a clear yes.
 
+Every approved change gets its own commit with a meaningful
+message describing what changed and why — no batching
+unrelated changes into one commit, no placeholder messages.
+
 ## Project: lrc_fix.py
 
 Single-file `uv` script (PEP 723 inline deps, shebang
