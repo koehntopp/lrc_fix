@@ -57,6 +57,13 @@ Before sending any reply, scan it once for:
 
 If any remain, rewrite before sending.
 
+## Workflow
+
+Before making any change to this repo, present an
+implementation plan to the user and get explicit approval
+first. Don't start editing on the strength of an implied
+go-ahead — wait for a clear yes.
+
 ## Project: lrc_fix.py
 
 Single-file `uv` script (PEP 723 inline deps, shebang
