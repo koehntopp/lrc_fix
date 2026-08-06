@@ -67,6 +67,8 @@ go-ahead — wait for a clear yes.
 Every approved change gets its own commit with a meaningful
 message describing what changed and why — no batching
 unrelated changes into one commit, no placeholder messages.
+Push to origin immediately after each commit — don't let
+commits pile up unpushed.
 
 ## Project: lrc_fix.py
 
