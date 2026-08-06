@@ -106,13 +106,24 @@ more.
    vocal attack, not mid-word. Unmatched lines are filled by
    interpolating between neighboring known times, then all
    times are clamped non-decreasing.
-6. Tag is rewritten in place. The pre-fix tag value is
-   preserved once under `LYRICS_ORIGINAL` on first write —
-   every subsequent run realigns from that pristine backup,
-   never from the tool's own prior output, so re-runs are
-   idempotent instead of compounding.
+6. Tag is rewritten in place, parsed fresh from whatever the
+   `LYRICS` tag currently holds each run - no backup tag, no
+   fallback to a prior value. This is deliberate: it lets the
+   user hand-edit the tag (fix a misheard word, add a line
+   that repeats but was only written once) and have that edit
+   take effect on the next run. If a run goes wrong, the fix
+   is to delete the tag and re-fetch lyrics (e.g. from
+   lrclib.net), not to restore from an internal backup.
 
 ### Deliberate non-choices (don't reintroduce without asking)
+- No `LYRICS_ORIGINAL` backup tag. An earlier version
+  preserved the pre-fix tag value under `LYRICS_ORIGINAL` and
+  always realigned from that instead of the current tag, to
+  keep re-runs idempotent against the tool's own prior buggy
+  output. Once the underlying parsing bugs were fixed, this
+  became a liability instead: it silently discarded any
+  manual edit the user made to the tag between runs. Removed
+  in favor of always parsing the tag's current content.
 - No LLM in the alignment path. An earlier version asked a
   local Ollama model to output line→timestamp JSON directly;
   it was unreliable at precise positional/numeric reasoning

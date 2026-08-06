@@ -20,7 +20,10 @@ sections can't get mistaken for speech, then use whisperx to get real
 word-level timestamps from the isolated vocals, then align the correct
 lyric lines against that ASR transcript with deterministic word sequence
 matching (difflib) to produce a synced LRC. The LYRICS tag is rewritten in
-place; the pre-fix value is preserved once under LYRICS_ORIGINAL.
+place, parsed fresh from its current content each run - so manual edits to
+the tag (fixing a misheard word, adding a line that repeats but was only
+written once) take effect on the next run. No backup is kept; if a run goes
+wrong, delete the tag and re-fetch lyrics (e.g. from lrclib.net) instead.
 
 Alignment is intentionally not LLM-based: local models are unreliable at
 precise positional/numeric reasoning over a long transcript (they can lose
@@ -69,13 +72,6 @@ def find_flac_files(path: Path) -> list[Path]:
 
 def read_lyrics_tag(flac: FLAC) -> str | None:
     values = flac.get("LYRICS")
-    if not values:
-        return None
-    return "\n".join(values)
-
-
-def read_original_lyrics_tag(flac: FLAC) -> str | None:
-    values = flac.get("LYRICS_ORIGINAL")
     if not values:
         return None
     return "\n".join(values)
@@ -293,12 +289,10 @@ def build_lrc(id_tags: list[str], lyric_lines: list[str], times: list[float]) ->
     return "\n".join([*id_tags, *timed])
 
 
-def write_lyrics_tag(flac: FLAC, original_raw: str, new_lrc: str, dry_run: bool) -> None:
+def write_lyrics_tag(flac: FLAC, new_lrc: str, dry_run: bool) -> None:
     print(new_lrc)
     if dry_run:
         return
-    if "LYRICS_ORIGINAL" not in flac:
-        flac["LYRICS_ORIGINAL"] = original_raw
     flac["LYRICS"] = new_lrc
     flac.save()
 
@@ -311,11 +305,7 @@ def process_file(path: Path, args: argparse.Namespace) -> None:
         print("   skip: no LYRICS tag")
         return
 
-    # Always realign from the pristine pre-fix text if we have it, so
-    # re-runs don't compound on our own previous LRC output.
-    original_raw = read_original_lyrics_tag(flac) or raw
-
-    id_tags, lyric_lines = strip_lyric_lines(original_raw)
+    id_tags, lyric_lines = strip_lyric_lines(raw)
     if not lyric_lines:
         print("   skip: LYRICS tag empty after parsing")
         return
@@ -348,7 +338,7 @@ def process_file(path: Path, args: argparse.Namespace) -> None:
     times = finalize_times(raw_times, onsets)
 
     new_lrc = build_lrc(id_tags, lyric_lines, times)
-    write_lyrics_tag(flac, original_raw, new_lrc, args.dry_run)
+    write_lyrics_tag(flac, new_lrc, args.dry_run)
     print(f"   {'would update' if args.dry_run else 'updated'} LYRICS tag")
 
 

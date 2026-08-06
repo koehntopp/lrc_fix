@@ -28,9 +28,11 @@ the waveform.
    landing on the actual start of the word instead of somewhere in the
    middle of it.
 5. **Write back** — the FLAC's `LYRICS` tag is rewritten with the new LRC
-   content. The original tag value is preserved once under
-   `LYRICS_ORIGINAL`, so every subsequent run realigns from the pristine
-   original rather than compounding on the tool's own prior output.
+   content. Each run parses whatever the tag currently holds, so you can
+   hand-edit it (fix a misheard word, add a line that repeats in the song
+   but was only written once) and the edit takes effect next run. No backup
+   is kept — if a run goes wrong, delete the tag and re-fetch lyrics (e.g.
+   from [lrclib.net](https://lrclib.net)).
 
 ## Requirements
 
