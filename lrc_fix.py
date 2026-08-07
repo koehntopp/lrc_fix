@@ -6,7 +6,6 @@
 #     "whisperx",
 #     "demucs",
 #     "librosa",
-#     "tqdm",
 #     "torch>=2.4,<2.6",
 #     "torchaudio>=2.4,<2.6",
 #     "numpy<2",
@@ -58,7 +57,6 @@ logging.getLogger("lightning_fabric").setLevel(logging.ERROR)
 logging.getLogger("speechbrain").setLevel(logging.ERROR)
 
 from mutagen.flac import FLAC
-from tqdm import tqdm
 
 LRC_TIMESTAMP_RE = re.compile(r"^\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]\s*")
 LRC_ID_TAG_RE = re.compile(r"^\[[a-zA-Z]{2,10}:[^\]]*\]$")
@@ -75,6 +73,11 @@ def read_lyrics_tag(flac: FLAC) -> str | None:
     if not values:
         return None
     return "\n".join(values)
+
+
+def is_lrc(raw: str) -> bool:
+    """True if any line already carries an [mm:ss.xx]-style timestamp."""
+    return any(LRC_TIMESTAMP_RE.match(line.strip()) for line in raw.splitlines())
 
 
 def strip_lyric_lines(raw: str) -> tuple[list[str], list[str]]:
@@ -297,8 +300,8 @@ def write_lyrics_tag(flac: FLAC, new_lrc: str, dry_run: bool) -> None:
     flac.save()
 
 
-def process_file(path: Path, args: argparse.Namespace) -> None:
-    print(f"== {path}")
+def process_file(path: Path, args: argparse.Namespace, index: int, total: int) -> None:
+    print(f"== [{index}/{total}] {path}")
     flac = FLAC(path)
     raw = read_lyrics_tag(flac)
     if not raw:
@@ -350,6 +353,9 @@ def main() -> int:
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--compute-type", default="int8")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--all", action="store_true",
+                         help="when path is a directory, also reprocess files whose "
+                              "LYRICS tag is already LRC-timestamped")
     parser.add_argument("--no-isolate-vocals", action="store_true",
                          help="skip demucs vocal separation, transcribe the full mix")
     parser.add_argument("--no-snap-onsets", action="store_true",
@@ -363,9 +369,31 @@ def main() -> int:
         print(f"no .flac files found under {args.path}", file=sys.stderr)
         return 1
 
-    for path in tqdm(files, desc="files", unit="file"):
+    if args.path.is_dir() and not args.all:
+        kept = []
+        skipped = 0
+        for f in files:
+            try:
+                raw = read_lyrics_tag(FLAC(f))
+            except Exception as exc:
+                print(f"error reading {f}: {exc}", file=sys.stderr)
+                continue
+            if raw and is_lrc(raw):
+                skipped += 1
+            else:
+                kept.append(f)
+        if skipped:
+            print(f"skipping {skipped} file(s) already LRC-timestamped (use --all to include them)")
+        files = kept
+
+    if not files:
+        print("nothing to process")
+        return 0
+
+    print(f"{len(files)} file(s) to process")
+    for i, path in enumerate(files, 1):
         try:
-            process_file(path, args)
+            process_file(path, args, i, len(files))
         except Exception as exc:
             print(f"   error: {exc}", file=sys.stderr)
 

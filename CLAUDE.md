@@ -77,6 +77,15 @@ Single-file `uv` script (PEP 723 inline deps, shebang
 no test suite — keep it that way unless the user asks for
 more.
 
+### CLI behavior
+`path` may be a single `.flac` file (always processed, no
+filtering) or a directory (searched recursively via
+`rglob`). In directory mode, files whose `LYRICS` tag is
+already LRC-timestamped are skipped by default - `--all`
+overrides. The file list is filtered/counted up front and
+`main` logs `[i/N] <path>` per file so progress is visible
+before the (slow) per-file work starts.
+
 ### Pipeline
 1. Read the FLAC `LYRICS` vorbis comment (mutagen). Parse
    into `(id_tags, lyric_lines)` — `[ar:]/[ti:]/[al:]`-style

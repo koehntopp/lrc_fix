@@ -57,8 +57,11 @@ Or just clone the repo.
 # single file
 ./lrc_fix.py song.flac
 
-# every .flac under a directory, recursively
+# every .flac under a directory, recursively - only plain-text/un-timed lyrics
 ./lrc_fix.py ~/Music/some_album/
+
+# also reprocess files that already have LRC timestamps
+./lrc_fix.py ~/Music/some_album/ --all
 
 # preview without writing the tag
 ./lrc_fix.py song.flac --dry-run
@@ -70,6 +73,13 @@ Or just clone the repo.
 A file is skipped if it has no `LYRICS` tag, or if the tag is empty after
 stripping timestamps/header lines.
 
+When `path` is a directory, files are found recursively (including
+subdirectories) and, by default, only files whose `LYRICS` tag is *not*
+already LRC-timestamped are processed — pass `--all` to reprocess
+already-timestamped files too. This filtering doesn't apply when `path` is
+a single file: naming a file directly always processes it. The tool counts
+the files to process up front and logs `[i/N] <path>` as each one starts.
+
 ### Options
 
 | Flag | Default | Description |
@@ -79,6 +89,7 @@ stripping timestamps/header lines.
 | `--device` | `cpu` | `cpu` or `cuda` |
 | `--compute-type` | `int8` | faster-whisper compute type |
 | `--dry-run` | off | Print the resulting LRC, don't write the tag |
+| `--all` | off | Directory mode: also reprocess already-LRC-timestamped files |
 | `--no-isolate-vocals` | off | Skip demucs separation, transcribe the full mix |
 | `--no-snap-onsets` | off | Skip onset detection/snapping |
 | `--dump-words` | off | Print the raw ASR word/timestamp transcript (debugging) |
