@@ -95,7 +95,9 @@ before the (slow) per-file work starts.
    tag started as plain text or an existing LRC. `ensure_id_
    tags` then fills in any of ar/ti/al missing from id_tags
    using the file's own ARTIST/TITLE/ALBUM vorbis comments,
-   without touching keys already present.
+   without touching keys already present, and always stamps
+   `[re:CREATOR_TAG]` (the tool's GitHub URL), replacing any
+   prior `[re:]` line since it names the tool, not user data.
 2. `separate_vocals`: demucs (`--two-stems vocals`) isolates
    the vocal stem so whisper never sees instrumental-only
    audio — that's the main hallucination trigger. Default

@@ -106,6 +106,8 @@ the files to process up front and logs `[i/N] <path>` as each one starts.
   are preserved as-is and never timestamped. Any of the three that's
   missing gets filled in from the file's own `ARTIST`/`TITLE`/`ALBUM` tags
   (when set).
+- Every write stamps `[re:https://github.com/koehntopp/lrc_fix]` (the LRC
+  spec's "creator" tag), replacing any prior `[re:]` line.
 
 ## License
 

@@ -112,14 +112,21 @@ def strip_lyric_lines(raw: str) -> tuple[list[str], list[str]]:
 _STANDARD_ID_TAGS = [("ar", "ARTIST"), ("ti", "TITLE"), ("al", "ALBUM")]
 _ID_TAG_KEY_RE = re.compile(r"^\[([a-zA-Z]+):")
 
+# LRC spec's [re:] tag identifies the player/editor that created the file.
+# Always overwritten on write - it names the tool, not user-owned data.
+CREATOR_TAG = "https://github.com/koehntopp/lrc_fix"
+
 
 def ensure_id_tags(id_tags: list[str], flac: FLAC) -> list[str]:
-    """Fill in missing [ar:]/[ti:]/[al:] header lines from the FLAC's own tags.
+    """Fill in missing [ar:]/[ti:]/[al:] header lines from the FLAC's own tags,
+    and stamp [re:CREATOR_TAG] to identify this tool as the file's creator.
 
-    Existing id_tags are left untouched; only keys that are missing entirely
-    get synthesized from the file's ARTIST/TITLE/ALBUM vorbis comments (when
-    present). Any other pre-existing id tag lines (e.g. [by:...]) are kept,
-    in their original order, after the standard ones.
+    ar/ti/al lines already present are left untouched; only keys missing
+    entirely get synthesized from the file's ARTIST/TITLE/ALBUM vorbis
+    comments (when present). Any pre-existing [re:] line is replaced (it
+    records which tool last touched the file, not user data). Any other
+    pre-existing id tag lines (e.g. [by:...]) are kept, in their original
+    order, after the standard ones.
     """
     by_key = {}
     others = []
@@ -128,7 +135,7 @@ def ensure_id_tags(id_tags: list[str], flac: FLAC) -> list[str]:
         key = m.group(1).lower() if m else ""
         if key in dict(_STANDARD_ID_TAGS):
             by_key[key] = line
-        else:
+        elif key != "re":
             others.append(line)
 
     result = []
@@ -139,6 +146,7 @@ def ensure_id_tags(id_tags: list[str], flac: FLAC) -> list[str]:
             values = flac.get(vorbis_key)
             if values and values[0]:
                 result.append(f"[{key}:{values[0]}]")
+    result.append(f"[re:{CREATOR_TAG}]")
     result.extend(others)
     return result
 
