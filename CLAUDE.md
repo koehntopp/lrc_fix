@@ -86,6 +86,11 @@ overrides. The file list is filtered/counted up front and
 `main` logs `[i/N] <path>` per file so progress is visible
 before the (slow) per-file work starts.
 
+Per-file, `process_file` skips early (before demucs/whisperx
+run) on: no `LYRICS` tag, tag empty after parsing, or an
+instrumental placeholder (`is_instrumental` - a single line
+matching `[Ii]nstrumental` with optional brackets/parens).
+
 ### Pipeline
 1. Read the FLAC `LYRICS` vorbis comment (mutagen). Parse
    into `(id_tags, lyric_lines)` — `[ar:]/[ti:]/[al:]`-style

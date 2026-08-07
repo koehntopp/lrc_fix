@@ -80,6 +80,14 @@ def is_lrc(raw: str) -> bool:
     return any(LRC_TIMESTAMP_RE.match(line.strip()) for line in raw.splitlines())
 
 
+_INSTRUMENTAL_RE = re.compile(r"^[\[(]?\s*instrumental\s*[\])]?$", re.IGNORECASE)
+
+
+def is_instrumental(lyric_lines: list[str]) -> bool:
+    """True if the tag is just a placeholder like 'Instrumental'/'[Instrumental]'."""
+    return len(lyric_lines) == 1 and bool(_INSTRUMENTAL_RE.match(lyric_lines[0]))
+
+
 def strip_lyric_lines(raw: str) -> tuple[list[str], list[str]]:
     """Split raw LYRICS content into (id_tags, lyric_lines).
 
@@ -353,6 +361,9 @@ def process_file(path: Path, args: argparse.Namespace, index: int, total: int) -
     id_tags, lyric_lines = strip_lyric_lines(raw)
     if not lyric_lines:
         print("   skip: LYRICS tag empty after parsing")
+        return
+    if is_instrumental(lyric_lines):
+        print("   skip: instrumental (no lyrics to align)")
         return
     id_tags = ensure_id_tags(id_tags, flac)
 

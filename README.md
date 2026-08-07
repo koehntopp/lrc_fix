@@ -70,8 +70,10 @@ Or just clone the repo.
 ./lrc_fix.py song.flac --language en
 ```
 
-A file is skipped if it has no `LYRICS` tag, or if the tag is empty after
-stripping timestamps/header lines.
+A file is skipped if it has no `LYRICS` tag, if the tag is empty after
+stripping timestamps/header lines, or if it's just an instrumental
+placeholder (`Instrumental`, `[Instrumental]`, etc.) — no need to run
+demucs/whisperx when there's no lyric text to align.
 
 When `path` is a directory, files are found recursively (including
 subdirectories) and, by default, only files whose `LYRICS` tag is *not*
