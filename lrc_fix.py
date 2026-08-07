@@ -109,6 +109,40 @@ def strip_lyric_lines(raw: str) -> tuple[list[str], list[str]]:
     return id_tags, lines
 
 
+_STANDARD_ID_TAGS = [("ar", "ARTIST"), ("ti", "TITLE"), ("al", "ALBUM")]
+_ID_TAG_KEY_RE = re.compile(r"^\[([a-zA-Z]+):")
+
+
+def ensure_id_tags(id_tags: list[str], flac: FLAC) -> list[str]:
+    """Fill in missing [ar:]/[ti:]/[al:] header lines from the FLAC's own tags.
+
+    Existing id_tags are left untouched; only keys that are missing entirely
+    get synthesized from the file's ARTIST/TITLE/ALBUM vorbis comments (when
+    present). Any other pre-existing id tag lines (e.g. [by:...]) are kept,
+    in their original order, after the standard ones.
+    """
+    by_key = {}
+    others = []
+    for line in id_tags:
+        m = _ID_TAG_KEY_RE.match(line)
+        key = m.group(1).lower() if m else ""
+        if key in dict(_STANDARD_ID_TAGS):
+            by_key[key] = line
+        else:
+            others.append(line)
+
+    result = []
+    for key, vorbis_key in _STANDARD_ID_TAGS:
+        if key in by_key:
+            result.append(by_key[key])
+        else:
+            values = flac.get(vorbis_key)
+            if values and values[0]:
+                result.append(f"[{key}:{values[0]}]")
+    result.extend(others)
+    return result
+
+
 def separate_vocals(audio_path: Path, device: str, work_dir: Path) -> Path:
     """Run demucs source separation and return the path to the vocals-only stem.
 
@@ -312,6 +346,7 @@ def process_file(path: Path, args: argparse.Namespace, index: int, total: int) -
     if not lyric_lines:
         print("   skip: LYRICS tag empty after parsing")
         return
+    id_tags = ensure_id_tags(id_tags, flac)
 
     with tempfile.TemporaryDirectory(prefix="lrc_fix_") as tmp:
         audio_path = path

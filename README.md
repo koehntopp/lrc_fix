@@ -103,7 +103,9 @@ the files to process up front and logs `[i/N] <path>` as each one starts.
   lyrics text is already known, the alignment step only needs *usable*
   ASR output to match against, not maximally accurate transcription.
 - Standard LRC header lines (`[ar:...]`, `[ti:...]`, `[al:...]`) in the tag
-  are preserved as-is and never timestamped.
+  are preserved as-is and never timestamped. Any of the three that's
+  missing gets filled in from the file's own `ARTIST`/`TITLE`/`ALBUM` tags
+  (when set).
 
 ## License
 

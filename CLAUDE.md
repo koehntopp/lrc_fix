@@ -92,7 +92,10 @@ before the (slow) per-file work starts.
    header lines are passed through untouched; any per-line
    `[mm:ss.xx]` timestamps on the rest are stripped since
    they get recomputed from audio regardless of whether the
-   tag started as plain text or an existing LRC.
+   tag started as plain text or an existing LRC. `ensure_id_
+   tags` then fills in any of ar/ti/al missing from id_tags
+   using the file's own ARTIST/TITLE/ALBUM vorbis comments,
+   without touching keys already present.
 2. `separate_vocals`: demucs (`--two-stems vocals`) isolates
    the vocal stem so whisper never sees instrumental-only
    audio — that's the main hallucination trigger. Default
