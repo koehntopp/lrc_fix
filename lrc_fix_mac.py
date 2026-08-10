@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import os
 import re
 import subprocess
 import sys
@@ -193,7 +194,12 @@ def separate_vocals(audio_path: Path, device: str, work_dir: Path) -> Path:
         "-o", str(work_dir),
         str(audio_path),
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    # htdemucs has a conv1d layer with >65536 output channels, which PyTorch's
+    # MPS backend doesn't implement yet (NotImplementedError at that op).
+    # This makes just that op fall back to CPU per-call while the rest of the
+    # model still runs on MPS - narrower than forcing device="cpu" outright.
+    env = {**os.environ, "PYTORCH_ENABLE_MPS_FALLBACK": "1"}
+    proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
     if proc.returncode != 0:
         raise RuntimeError(f"demucs failed:\n{proc.stderr}")
 
