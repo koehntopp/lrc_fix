@@ -110,7 +110,11 @@ matching `[Ii]nstrumental` with optional brackets/parens).
 2. `separate_vocals`: demucs (`--two-stems vocals`) isolates
    the vocal stem so whisper never sees instrumental-only
    audio — that's the main hallucination trigger. Default
-   on; `--no-isolate-vocals` to skip.
+   on; `--no-isolate-vocals` to skip. `--jobs`/`-j` (default
+   `min(4, cpu count)`) parallelizes demucs's own chunked
+   processing across cores — capped rather than using every
+   core unconditionally since each job holds a model copy in
+   memory.
 3. `transcribe_words`: whisperx transcribes + force-aligns
    the (isolated) audio to get word-level timestamps.
    `condition_on_previous_text=False` stops a hallucinated

@@ -41,6 +41,7 @@ from __future__ import annotations
 import argparse
 import difflib
 import logging
+import os
 import re
 import subprocess
 import sys
@@ -173,16 +174,20 @@ def ensure_id_tags(id_tags: list[str], flac: FLAC) -> list[str]:
     return result
 
 
-def separate_vocals(audio_path: Path, device: str, work_dir: Path) -> Path:
+def separate_vocals(audio_path: Path, device: str, jobs: int, work_dir: Path) -> Path:
     """Run demucs source separation and return the path to the vocals-only stem.
 
     Isolating vocals before transcription keeps instrumental sections from
     being mistaken for speech, which is whisper's main hallucination trigger.
+    `jobs` parallelizes demucs's own chunked processing across CPU cores -
+    each job holds a copy of the model in memory, so it's capped by default
+    rather than using every core unconditionally.
     """
     cmd = [
         sys.executable, "-m", "demucs",
         "--two-stems", "vocals",
         "-d", device,
+        "-j", str(jobs),
         "-o", str(work_dir),
         str(audio_path),
     ]
@@ -384,8 +389,8 @@ def process_file(path: Path, args: argparse.Namespace, index: int, total: int) -
     with tempfile.TemporaryDirectory(prefix="lrc_fix_") as tmp:
         audio_path = path
         if not args.no_isolate_vocals:
-            print("   isolating vocals (demucs)...")
-            audio_path = separate_vocals(path, args.device, Path(tmp))
+            print(f"   isolating vocals (demucs, {args.jobs} job(s))...")
+            audio_path = separate_vocals(path, args.device, args.jobs, Path(tmp))
 
         print(f"   transcribing ({args.whisper_model}, {args.device})...")
         words = transcribe_words(audio_path, args.whisper_model, args.device,
@@ -420,6 +425,9 @@ def main() -> int:
     parser.add_argument("--language", default=None)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--compute-type", default="int8")
+    parser.add_argument("--jobs", "-j", type=int, default=min(4, os.cpu_count() or 1),
+                         help="parallel demucs jobs (each holds a model copy in memory; "
+                              "default is min(4, cpu count) to bound memory use)")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--all", action="store_true",
                          help="when path is a directory, also reprocess files whose "

@@ -92,6 +92,7 @@ always processes it. The tool logs `[i/N] <path>` as each file starts.
 | `--language` | auto-detect | Force ASR language (ISO 639-1, e.g. `en`, `de`) |
 | `--device` | `cpu` | `cpu` or `cuda` |
 | `--compute-type` | `int8` | faster-whisper compute type |
+| `--jobs` / `-j` | `min(4, cpu count)` | Parallel demucs jobs (each holds a model copy in memory) |
 | `--dry-run` | off | Print the resulting LRC, don't write the tag |
 | `--all` | off | Directory mode: also reprocess already-LRC-timestamped files |
 | `--no-isolate-vocals` | off | Skip demucs separation, transcribe the full mix |
