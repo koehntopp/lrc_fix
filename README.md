@@ -76,11 +76,13 @@ placeholder (`Instrumental`, `[Instrumental]`, etc.) — no need to run
 demucs/whisperx when there's no lyric text to align.
 
 When `path` is a directory, files are found recursively (including
-subdirectories) and, by default, only files whose `LYRICS` tag is *not*
-already LRC-timestamped are processed — pass `--all` to reprocess
-already-timestamped files too. This filtering doesn't apply when `path` is
-a single file: naming a file directly always processes it. The tool counts
-the files to process up front and logs `[i/N] <path>` as each one starts.
+subdirectories). By default, only files whose `LYRICS` tag is *not* already
+LRC-timestamped are processed — pass `--all` to reprocess already-timestamped
+files too. Files with no usable lyrics (missing tag, empty, or an
+instrumental placeholder) are excluded from the count regardless of `--all`,
+so the number reported up front matches what will actually run. This
+filtering doesn't apply when `path` is a single file: naming a file directly
+always processes it. The tool logs `[i/N] <path>` as each file starts.
 
 ### Options
 

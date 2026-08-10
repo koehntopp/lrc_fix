@@ -437,21 +437,31 @@ def main() -> int:
         print(f"no .flac files found under {args.path}", file=sys.stderr)
         return 1
 
-    if args.path.is_dir() and not args.all:
+    if args.path.is_dir():
         kept = []
-        skipped = 0
+        skipped_lrc = 0
+        skipped_no_lyrics = 0
         for f in files:
             try:
                 raw = read_lyrics_tag(FLAC(f))
             except Exception as exc:
                 print(f"error reading {f}: {exc}", file=sys.stderr)
                 continue
-            if raw and is_lrc(raw):
-                skipped += 1
-            else:
-                kept.append(f)
-        if skipped:
-            print(f"skipping {skipped} file(s) already LRC-timestamped (use --all to include them)")
+            if not raw:
+                skipped_no_lyrics += 1
+                continue
+            if not args.all and is_lrc(raw):
+                skipped_lrc += 1
+                continue
+            _, lyric_lines = strip_lyric_lines(raw)
+            if not lyric_lines or is_instrumental(lyric_lines):
+                skipped_no_lyrics += 1
+                continue
+            kept.append(f)
+        if skipped_lrc:
+            print(f"skipping {skipped_lrc} file(s) already LRC-timestamped (use --all to include them)")
+        if skipped_no_lyrics:
+            print(f"skipping {skipped_no_lyrics} file(s) with no usable lyrics")
         files = kept
 
     if not files:

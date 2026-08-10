@@ -82,9 +82,13 @@ more.
 filtering) or a directory (searched recursively via
 `rglob`). In directory mode, files whose `LYRICS` tag is
 already LRC-timestamped are skipped by default - `--all`
-overrides. The file list is filtered/counted up front and
-`main` logs `[i/N] <path>` per file so progress is visible
-before the (slow) per-file work starts.
+overrides. Files with no usable lyrics (no `LYRICS` tag,
+empty after parsing, or an instrumental placeholder) are
+also excluded up front regardless of `--all`, so the printed
+count matches what will actually run. The file list is
+filtered/counted up front and `main` logs `[i/N] <path>` per
+file so progress is visible before the (slow) per-file work
+starts.
 
 Per-file, `process_file` skips early (before demucs/whisperx
 run) on: no `LYRICS` tag, tag empty after parsing, or an
