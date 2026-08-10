@@ -125,19 +125,29 @@ _ID_TAG_KEY_RE = re.compile(r"^\[([a-zA-Z]+):")
 CREATOR_TAG = "https://github.com/koehntopp/lrc_fix"
 
 
+def format_length_tag(seconds: float) -> str:
+    minutes = int(seconds // 60)
+    secs = int(seconds - minutes * 60)
+    return f"[length:{minutes:02d}:{secs:02d}]"
+
+
 def ensure_id_tags(id_tags: list[str], flac: FLAC) -> list[str]:
-    """Fill in missing [ar:]/[ti:]/[al:] header lines from the FLAC's own tags,
-    and stamp [re:CREATOR_TAG] to identify this tool as the file's creator.
+    """Fill in missing [ar:]/[ti:]/[al:]/[length:] header lines from the FLAC's
+    own tags/audio duration, and stamp [re:CREATOR_TAG] to identify this tool
+    as the file's creator.
 
     ar/ti/al lines already present are left untouched; only keys missing
     entirely get synthesized from the file's ARTIST/TITLE/ALBUM vorbis
-    comments (when present). Any pre-existing [re:] line is replaced (it
-    records which tool last touched the file, not user data). Any other
-    pre-existing id tag lines (e.g. [by:...]) are kept, in their original
-    order, after the standard ones.
+    comments (when present). [length:] is handled the same way but sourced
+    from flac.info.length (there's no vorbis comment for it) rather than
+    left for some other tool to add later. Any pre-existing [re:] line is
+    replaced (it records which tool last touched the file, not user data).
+    Any other pre-existing id tag lines (e.g. [by:...]) are kept, in their
+    original order, after the standard ones.
     """
     by_key = {}
     others = []
+    has_length = False
     for line in id_tags:
         m = _ID_TAG_KEY_RE.match(line)
         key = m.group(1).lower() if m else ""
@@ -145,6 +155,8 @@ def ensure_id_tags(id_tags: list[str], flac: FLAC) -> list[str]:
             by_key[key] = line
         elif key != "re":
             others.append(line)
+            if key == "length":
+                has_length = True
 
     result = []
     for key, vorbis_key in _STANDARD_ID_TAGS:
@@ -155,6 +167,8 @@ def ensure_id_tags(id_tags: list[str], flac: FLAC) -> list[str]:
             if values and values[0]:
                 result.append(f"[{key}:{values[0]}]")
     result.append(f"[re:{CREATOR_TAG}]")
+    if not has_length and getattr(flac.info, "length", None):
+        result.append(format_length_tag(flac.info.length))
     result.extend(others)
     return result
 
