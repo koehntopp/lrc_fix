@@ -13,24 +13,23 @@
 # ///
 """lrc_fix_mac.py - Apple Silicon variant of lrc_fix.py
 
-EXPERIMENTAL test copy. Same LRC-sync pipeline as lrc_fix.py, but swaps the
-two GPU-accelerable stages to run on Apple's Metal backend instead of CPU:
+EXPERIMENTAL test copy. Same LRC-sync pipeline as lrc_fix.py, retargeted at
+Apple Silicon acceleration where it actually works:
 
-- demucs vocal separation runs on `--device` (default "mps", PyTorch's Metal
-  backend) instead of "cpu".
 - Transcription uses mlx-whisper (Apple's MLX framework, Metal/ANE-native)
   instead of whisperx/faster-whisper. mlx-whisper also produces word-level
   timestamps directly (its own DTW-based alignment), so the separate
   whisperx + wav2vec2 forced-alignment step is gone entirely - one model
-  call instead of two, and no CTranslate2 dependency.
-
-Why not just pass --device mps to the original: whisperx's transcription
-backend (faster-whisper, built on CTranslate2) only supports "cpu" and
-"cuda" - there is no MPS support in CTranslate2 at all. That stage is the
-dominant compute cost, so a straight device swap on lrc_fix.py would only
-accelerate demucs and alignment, leaving transcription - the expensive
-part - unaccelerated. mlx-whisper is the way to actually get transcription
-onto the GPU/ANE on Apple Silicon.
+  call instead of two, no CTranslate2 dependency, and this is the stage
+  that actually gets meaningfully faster here (it was the dominant compute
+  cost, and CTranslate2 has no MPS support at all to begin with).
+- demucs vocal separation stays on `--device cpu` by default. "mps" is
+  available but NOT the default: the default demucs model (htdemucs) has a
+  conv1d layer with >65536 output channels, a hard Metal dimension limit
+  that PYTORCH_ENABLE_MPS_FALLBACK=1 does not work around (confirmed by
+  testing - it's a deliberate raise in the MPS kernel itself, not a missing
+  op the generic fallback dispatch catches). "mps" only works here with a
+  non-htdemucs model (e.g. `mdx_extra`) that doesn't hit that limit.
 
 librosa onset detection remains NumPy/SciPy - no GPU path either way.
 
@@ -184,8 +183,20 @@ def separate_vocals(audio_path: Path, device: str, work_dir: Path) -> Path:
 
     Isolating vocals before transcription keeps instrumental sections from
     being mistaken for speech, which is whisper's main hallucination trigger.
-    demucs is a plain PyTorch model, so `device` ("mps" by default here)
-    runs it on Apple Silicon's GPU via PyTorch's Metal backend.
+    demucs is a plain PyTorch model, so `device` runs it on GPU when set to
+    "mps"/"cuda" - but see the "cpu" default note below.
+
+    htdemucs (the default demucs model) has a conv1d layer with >65536
+    output channels, which is a hard Metal dimension limit, not merely an
+    unimplemented op - PYTORCH_ENABLE_MPS_FALLBACK=1 does NOT help here (the
+    MPS conv kernel raises deliberately once past the channel limit, so the
+    generic fallback dispatch never triggers). That's why `device` defaults
+    to "cpu" in main() for this script despite otherwise targeting Apple
+    Silicon: "mps" reliably crashes on htdemucs. It's kept as an option here
+    for anyone using a non-htdemucs model (e.g. `mdx_extra`) that doesn't
+    hit this limit. PYTORCH_ENABLE_MPS_FALLBACK=1 is still set below as a
+    harmless safety net for other, genuinely-unimplemented ops such a model
+    might hit.
     """
     cmd = [
         sys.executable, "-m", "demucs",
@@ -194,10 +205,6 @@ def separate_vocals(audio_path: Path, device: str, work_dir: Path) -> Path:
         "-o", str(work_dir),
         str(audio_path),
     ]
-    # htdemucs has a conv1d layer with >65536 output channels, which PyTorch's
-    # MPS backend doesn't implement yet (NotImplementedError at that op).
-    # This makes just that op fall back to CPU per-call while the rest of the
-    # model still runs on MPS - narrower than forcing device="cpu" outright.
     env = {**os.environ, "PYTORCH_ENABLE_MPS_FALLBACK": "1"}
     proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
     if proc.returncode != 0:
@@ -444,9 +451,12 @@ def main() -> int:
                          help="model size (tiny/base/small/medium/large-v3), or a "
                               "full mlx-community HF repo id / local path")
     parser.add_argument("--language", default=None)
-    parser.add_argument("--device", default="mps",
-                         help="device for demucs (mps/cpu/cuda); transcription always "
-                              "runs on MLX's Metal backend regardless of this flag")
+    parser.add_argument("--device", default="cpu",
+                         help="device for demucs (cpu/mps/cuda); defaults to cpu because "
+                              "the default demucs model (htdemucs) hits a hard MPS "
+                              "channel-count limit and reliably crashes on mps - try mps "
+                              "only with a non-htdemucs model. Transcription always runs "
+                              "on MLX's Metal backend regardless of this flag")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--all", action="store_true",
                          help="when path is a directory, also reprocess files whose "
