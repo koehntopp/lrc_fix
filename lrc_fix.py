@@ -450,6 +450,9 @@ def process_file(path: Path, args: argparse.Namespace, index: int, total: int) -
     if is_instrumental(lyric_lines):
         id_tags = ensure_id_tags(id_tags, flac)
         new_lrc = build_instrumental_lrc(id_tags)
+        if new_lrc == raw:
+            print("   already complete, no change")
+            return
         write_lyrics_tag(flac, new_lrc, args.dry_run)
         print(f"   {'would complete' if args.dry_run else 'completed'} instrumental marker")
         return
@@ -491,6 +494,9 @@ def process_file(path: Path, args: argparse.Namespace, index: int, total: int) -
     times = finalize_times(raw_times, onsets)
 
     new_lrc = build_lrc(id_tags, lyric_lines, times)
+    if new_lrc == raw:
+        print("   already up to date, no change")
+        return
     write_lyrics_tag(flac, new_lrc, args.dry_run)
     print(f"   {'would update' if args.dry_run else 'updated'} LYRICS tag")
 
