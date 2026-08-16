@@ -68,7 +68,7 @@ logging.getLogger("speechbrain").setLevel(logging.ERROR)
 from mutagen.flac import FLAC
 
 LRC_TIMESTAMP_RE = re.compile(r"^\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]\s*")
-LRC_ID_TAG_RE = re.compile(r"^\[[a-zA-Z]{2,10}:[^\]]*\]$")
+LRC_ID_TAG_RE = re.compile(r"^\[[a-zA-Z]{2,20}:[^\]]*\]$")
 
 
 def find_flac_files(path: Path) -> list[Path]:
@@ -141,43 +141,44 @@ def format_length_tag(seconds: float) -> str:
 
 
 def ensure_id_tags(id_tags: list[str], flac: FLAC) -> list[str]:
-    """Fill in missing [ar:]/[ti:]/[al:]/[length:] header lines from the FLAC's
-    own tags/audio duration, and stamp [re:CREATOR_TAG] to identify this tool
-    as the file's creator.
+    """Refresh [ar:]/[ti:]/[al:]/[length:] header lines from the FLAC's own
+    tags/audio duration, and stamp [re:CREATOR_TAG] to identify this tool as
+    the file's creator.
 
-    ar/ti/al lines already present are left untouched; only keys missing
-    entirely get synthesized from the file's ARTIST/TITLE/ALBUM vorbis
-    comments (when present). [length:] is handled the same way but sourced
-    from flac.info.length (there's no vorbis comment for it) rather than
-    left for some other tool to add later. Any pre-existing [re:] line is
-    replaced (it records which tool last touched the file, not user data).
-    Any other pre-existing id tag lines (e.g. [by:...]) are kept, in their
-    original order, after the standard ones.
+    ar/ti/al/length always prefer the FLAC's *current* value over whatever was
+    already in the tag, so a value that's gone stale since it was last written
+    (e.g. by another tool, or an earlier lrc_fix.py run before a retag) gets
+    corrected here rather than carried forward silently. The pre-existing line
+    is used only as a fallback when the FLAC itself has nothing for that key
+    (never regress to a blank header where something existed before). This
+    matches discogs/update_lyrics.py's own header-refresh behavior exactly, so
+    that tool never needs to re-touch a file lrc_fix.py just wrote. Any
+    pre-existing [re:] line is replaced (it records which tool last touched
+    the file, not user data). Any other pre-existing id tag lines (e.g.
+    [by:...]) are kept, in their original order, after the standard ones.
     """
     by_key = {}
     others = []
-    has_length = False
     for line in id_tags:
         m = _ID_TAG_KEY_RE.match(line)
         key = m.group(1).lower() if m else ""
-        if key in dict(_STANDARD_ID_TAGS):
+        if key in dict(_STANDARD_ID_TAGS) or key == "length":
             by_key[key] = line
         elif key != "re":
             others.append(line)
-            if key == "length":
-                has_length = True
 
     result = []
     for key, vorbis_key in _STANDARD_ID_TAGS:
-        if key in by_key:
+        values = flac.get(vorbis_key)
+        if values and values[0]:
+            result.append(f"[{key}:{values[0]}]")
+        elif key in by_key:
             result.append(by_key[key])
-        else:
-            values = flac.get(vorbis_key)
-            if values and values[0]:
-                result.append(f"[{key}:{values[0]}]")
     result.append(f"[re:{CREATOR_TAG}]")
-    if not has_length and getattr(flac.info, "length", None):
+    if getattr(flac.info, "length", None):
         result.append(format_length_tag(flac.info.length))
+    elif "length" in by_key:
+        result.append(by_key["length"])
     result.extend(others)
     return result
 
@@ -389,9 +390,30 @@ def format_lrc_timestamp(seconds: float) -> str:
     return f"[{minutes:02d}:{secs:05.2f}]"
 
 
+def _capitalize_line(text: str) -> str:
+    """Uppercase the first non-whitespace character, preserving leading whitespace.
+
+    Whisper's raw transcription isn't reliably capitalized at line starts (e.g.
+    mid-song continuations like "no, never alone,"). Matches
+    discogs/update_lyrics.py's own normalization exactly, so a line lrc_fix.py
+    just capitalized is never re-flagged as needing a fix there.
+    """
+    m = re.match(r"^(\s*)(\S)(.*)$", text, re.DOTALL)
+    return m.group(1) + m.group(2).upper() + m.group(3) if m else text
+
+
 def build_lrc(id_tags: list[str], lyric_lines: list[str], times: list[float]) -> str:
-    timed = (f"{format_lrc_timestamp(t)}{line}" for line, t in zip(lyric_lines, times))
+    timed = (
+        f"{format_lrc_timestamp(t)}{_capitalize_line(line)}"
+        for line, t in zip(lyric_lines, times)
+    )
     return "\n".join([*id_tags, *timed])
+
+
+def build_instrumental_lrc(id_tags: list[str]) -> str:
+    """Canonical instrumental marker, matching
+    discogs/update_lyrics.py's _make_instrumental_lrc() exactly."""
+    return "\n".join([*id_tags, "[la:zxx]", "[instrumental:true]", "[00:00.00](Instrumental)"])
 
 
 def write_lyrics_tag(flac: FLAC, new_lrc: str, dry_run: bool) -> None:
@@ -415,7 +437,10 @@ def process_file(path: Path, args: argparse.Namespace, index: int, total: int) -
         print("   skip: LYRICS tag empty after parsing")
         return
     if is_instrumental(lyric_lines):
-        print("   skip: instrumental (no lyrics to align)")
+        id_tags = ensure_id_tags(id_tags, flac)
+        new_lrc = build_instrumental_lrc(id_tags)
+        write_lyrics_tag(flac, new_lrc, args.dry_run)
+        print(f"   {'would complete' if args.dry_run else 'completed'} instrumental marker")
         return
     id_tags = ensure_id_tags(id_tags, flac)
 
@@ -481,9 +506,9 @@ def process_missing_lyrics_file(path: Path, args: argparse.Namespace, index: int
         return
 
     id_tags = ensure_id_tags([], flac)
-    new_lrc = build_lrc(id_tags, ["Instrumental"], [0.0])
+    new_lrc = build_instrumental_lrc(id_tags)
     write_lyrics_tag(flac, new_lrc, args.dry_run)
-    print(f"   {'would mark' if args.dry_run else 'marked'} as [Instrumental]")
+    print(f"   {'would mark' if args.dry_run else 'marked'} as instrumental")
 
 
 def main() -> int:
@@ -555,12 +580,19 @@ def main() -> int:
             if not raw:
                 skipped_no_lyrics += 1
                 continue
+            _, lyric_lines = strip_lyric_lines(raw)
+            if not lyric_lines:
+                skipped_no_lyrics += 1
+                continue
+            if is_instrumental(lyric_lines):
+                # Always keep instrumental placeholders for completion into the
+                # canonical marker, even if a stray/malformed timestamp on the
+                # line would otherwise make is_lrc() below treat it as
+                # already-processed and skip it forever.
+                kept.append(f)
+                continue
             if not args.all and is_lrc(raw):
                 skipped_lrc += 1
-                continue
-            _, lyric_lines = strip_lyric_lines(raw)
-            if not lyric_lines or is_instrumental(lyric_lines):
-                skipped_no_lyrics += 1
                 continue
             kept.append(f)
         if skipped_lrc:
