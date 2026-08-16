@@ -259,7 +259,11 @@ def transcribe_words(audio_path: Path, whisper_model: str, device: str,
     return words
 
 
-_WORD_RE = re.compile(r"[a-z0-9']+")
+# [^\W_]+ is "word characters minus underscore" - Unicode letters/digits from
+# any script (Cyrillic, Greek, CJK, Hebrew, accented Latin, ...), not just
+# ASCII a-z0-9. An internal apostrophe is allowed so contractions ("don't")
+# and similar (French "l'amour") tokenize as one word instead of splitting.
+_WORD_RE = re.compile(r"[^\W_]+(?:'[^\W_]+)*", re.UNICODE)
 
 
 def _tokenize(text: str) -> list[str]:

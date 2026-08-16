@@ -135,7 +135,12 @@ untouched; a human still has to fetch the actual lyrics.
    `condition_on_previous_text=False` stops a hallucinated
    guess from cascading into more hallucinated text.
 4. `match_line_times`: difflib sequence-matches ASR tokens
-   against lyric-line tokens. Only 2+-word matching runs are
+   against lyric-line tokens. `_tokenize` uses `[^\W_]+` (all
+   Unicode letters/digits, any script), not ASCII-only - a
+   narrower pattern would make any non-Latin-script lyrics
+   (Cyrillic, CJK, etc.) tokenize to nothing and spuriously
+   hit the zero-match fallback below regardless of whether
+   the audio actually matches. Only 2+-word matching runs are
    trusted for a line's timestamp; a lone matched word is
    too easy to hit by chance (e.g. a hallucinated phrase
    sharing one common word with some line) and is used only
