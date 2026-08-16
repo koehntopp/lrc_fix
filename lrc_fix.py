@@ -410,10 +410,21 @@ def build_lrc(id_tags: list[str], lyric_lines: list[str], times: list[float]) ->
     return "\n".join([*id_tags, *timed])
 
 
+_LA_OR_INSTRUMENTAL_TAG_RE = re.compile(r"^\[(la|instrumental):", re.IGNORECASE)
+
+
 def build_instrumental_lrc(id_tags: list[str]) -> str:
     """Canonical instrumental marker, matching
-    discogs/update_lyrics.py's _make_instrumental_lrc() exactly."""
-    return "\n".join([*id_tags, "[la:zxx]", "[instrumental:true]", "[00:00.00](Instrumental)"])
+    discogs/update_lyrics.py's _make_instrumental_lrc() exactly.
+
+    Strips any pre-existing la:/instrumental: lines from id_tags first, so
+    this is idempotent rather than duplicating the sentinel when called on a
+    file that's already canonically marked (id_tags can contain them because
+    LRC_ID_TAG_RE now recognizes [instrumental:true] as a header line and
+    ensure_id_tags() preserves unrecognized id tags it doesn't own).
+    """
+    filtered = [line for line in id_tags if not _LA_OR_INSTRUMENTAL_TAG_RE.match(line)]
+    return "\n".join([*filtered, "[la:zxx]", "[instrumental:true]", "[00:00.00](Instrumental)"])
 
 
 def write_lyrics_tag(flac: FLAC, new_lrc: str, dry_run: bool) -> None:
