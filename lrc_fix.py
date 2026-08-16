@@ -28,13 +28,21 @@ Alignment is intentionally not LLM-based: local models are unreliable at
 precise positional/numeric reasoning over a long transcript (they can lose
 track, guess, or lock onto the wrong occurrence of a repeated phrase).
 Sequence alignment grounds every timestamp in an actual matched ASR word.
+If alignment finds zero matches at all, that's checked against silero-vad
+as a second opinion before assuming the tag is just mislabeled.
+
+--find-missing-lyrics is a separate mode: scans for files with no LYRICS
+tag at all and uses VAD alone (no transcription needed) to tag genuine
+instrumentals automatically, while logging the rest as needing lyrics
+fetched from elsewhere.
 
 Usage:
     python lrc_fix.py song.flac
     python lrc_fix.py ~/Music/some_album/
     python lrc_fix.py ~/Music/some_album/ --whisper-model medium --dry-run
+    python lrc_fix.py ~/Music/some_album/ --find-missing-lyrics
 
-Requires: mutagen, whisperx, demucs
+Requires: mutagen, whisperx, demucs (silero-vad is fetched via torch.hub)
 """
 from __future__ import annotations
 
@@ -199,6 +207,27 @@ def separate_vocals(audio_path: Path, device: str, jobs: int, work_dir: Path) ->
     if vocals_path is None:
         raise RuntimeError(f"demucs did not produce a vocals.wav under {work_dir}")
     return vocals_path
+
+
+def has_speech(audio_path: Path) -> bool:
+    """True if silero-vad finds any speech activity at all in the audio.
+
+    Used as a fallback check, not a primary signal: VAD is trained on
+    speech, not singing-over-instrumentation, so it can miss quiet/heavily
+    processed vocals. Only meaningful as a second opinion when something
+    else (alignment finding zero matches, a missing LYRICS tag) already
+    suggests the track might be instrumental.
+    """
+    import torch
+
+    torch.set_num_threads(1)
+    model, utils = torch.hub.load(
+        repo_or_dir="snakers4/silero-vad", model="silero_vad", trust_repo=True
+    )
+    get_speech_timestamps, _, read_audio, *_ = utils
+    wav = read_audio(str(audio_path), sampling_rate=16000)
+    timestamps = get_speech_timestamps(wav, model, sampling_rate=16000)
+    return len(timestamps) > 0
 
 
 def transcribe_words(audio_path: Path, whisper_model: str, device: str,
@@ -396,26 +425,61 @@ def process_file(path: Path, args: argparse.Namespace, index: int, total: int) -
         words = transcribe_words(audio_path, args.whisper_model, args.device,
                                   args.compute_type, args.language)
 
+        if not words:
+            print("   skip: whisperx produced no word timestamps")
+            return
+
+        if args.dump_words:
+            for w in words:
+                print(f"   {w['t']:8.2f}  {w['w']}")
+
+        print(f"   aligning {len(lyric_lines)} lines...")
+        raw_times = match_line_times(lyric_lines, words)
+
+        if not args.no_vocal_check and all(t is None for t in raw_times):
+            print("   no lines matched - checking for vocal activity (VAD)...")
+            if not has_speech(audio_path):
+                print("   warning: no lines matched and no vocals detected (VAD) - "
+                      "possibly mislabeled instrumental; tag left unchanged")
+                return
+
         onsets = []
         if not args.no_snap_onsets:
             print("   detecting vocal onsets...")
             onsets = detect_onsets(audio_path)
 
-    if not words:
-        print("   skip: whisperx produced no word timestamps")
-        return
-
-    if args.dump_words:
-        for w in words:
-            print(f"   {w['t']:8.2f}  {w['w']}")
-
-    print(f"   aligning {len(lyric_lines)} lines...")
-    raw_times = match_line_times(lyric_lines, words)
     times = finalize_times(raw_times, onsets)
 
     new_lrc = build_lrc(id_tags, lyric_lines, times)
     write_lyrics_tag(flac, new_lrc, args.dry_run)
     print(f"   {'would update' if args.dry_run else 'updated'} LYRICS tag")
+
+
+def process_missing_lyrics_file(path: Path, args: argparse.Namespace, index: int, total: int) -> None:
+    """For a file with no LYRICS tag at all: use VAD to tell an actual
+    instrumental (tag it as such - nothing is being overwritten) from a
+    track that simply needs lyrics fetched (just log it, no tag write).
+    """
+    print(f"== [{index}/{total}] {path}")
+    flac = FLAC(path)
+
+    with tempfile.TemporaryDirectory(prefix="lrc_fix_") as tmp:
+        audio_path = path
+        if not args.no_isolate_vocals:
+            print(f"   isolating vocals (demucs, {args.jobs} job(s))...")
+            audio_path = separate_vocals(path, args.device, args.jobs, Path(tmp))
+
+        print("   checking for vocal activity (VAD)...")
+        found_speech = has_speech(audio_path)
+
+    if found_speech:
+        print(f"   Missing lyrics, not instrumental: {path}")
+        return
+
+    id_tags = ensure_id_tags([], flac)
+    new_lrc = build_lrc(id_tags, ["Instrumental"], [0.0])
+    write_lyrics_tag(flac, new_lrc, args.dry_run)
+    print(f"   {'would mark' if args.dry_run else 'marked'} as [Instrumental]")
 
 
 def main() -> int:
@@ -436,6 +500,14 @@ def main() -> int:
                          help="skip demucs vocal separation, transcribe the full mix")
     parser.add_argument("--no-snap-onsets", action="store_true",
                          help="don't snap line timestamps to detected vocal onsets")
+    parser.add_argument("--no-vocal-check", action="store_true",
+                         help="don't run a VAD fallback check when alignment finds zero "
+                              "matches (which otherwise warns about a possibly mislabeled "
+                              "instrumental instead of writing a useless tag)")
+    parser.add_argument("--find-missing-lyrics", action="store_true",
+                         help="instead of the normal pipeline, scan for files with no "
+                              "LYRICS tag at all and use VAD to tell instrumentals (tagged "
+                              "as such) from tracks that just need lyrics fetched (logged)")
     parser.add_argument("--dump-words", action="store_true",
                          help="print the raw ASR word/timestamp transcript for debugging")
     args = parser.parse_args()
@@ -444,6 +516,27 @@ def main() -> int:
     if not files:
         print(f"no .flac files found under {args.path}", file=sys.stderr)
         return 1
+
+    if args.find_missing_lyrics:
+        missing = []
+        for f in files:
+            try:
+                raw = read_lyrics_tag(FLAC(f))
+            except Exception as exc:
+                print(f"error reading {f}: {exc}", file=sys.stderr)
+                continue
+            if not raw:
+                missing.append(f)
+        if not missing:
+            print("nothing to process")
+            return 0
+        print(f"{len(missing)} file(s) with no LYRICS tag")
+        for i, path in enumerate(missing, 1):
+            try:
+                process_missing_lyrics_file(path, args, i, len(missing))
+            except Exception as exc:
+                print(f"   error: {exc}", file=sys.stderr)
+        return 0
 
     if args.path.is_dir():
         kept = []

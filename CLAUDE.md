@@ -95,6 +95,21 @@ run) on: no `LYRICS` tag, tag empty after parsing, or an
 instrumental placeholder (`is_instrumental` - a single line
 matching `[Ii]nstrumental` with optional brackets/parens).
 
+`--find-missing-lyrics` is a separate mode, mutually exclusive
+with the normal pipeline: `main` scans for files with no
+`LYRICS` tag at all (not empty/placeholder - strictly missing,
+the ones the normal pipeline always skips) and runs each
+through `process_missing_lyrics_file` instead of `process_file`.
+That isolates vocals (same demucs step, still respects
+`--no-isolate-vocals`) and runs `has_speech` alone, no
+transcription needed since there's no lyric text to align
+against. No speech found → write `LYRICS` as `Instrumental`
+(safe to auto-write here specifically because there's no
+existing lyric text at risk of being overwritten, unlike the
+`match_line_times` fallback above). Speech found → log
+`Missing lyrics, not instrumental: <path>` and leave the file
+untouched; a human still has to fetch the actual lyrics.
+
 ### Pipeline
 1. Read the FLAC `LYRICS` vorbis comment (mutagen). Parse
    into `(id_tags, lyric_lines)` — `[ar:]/[ti:]/[al:]`-style
@@ -125,6 +140,13 @@ matching `[Ii]nstrumental` with optional brackets/parens).
    too easy to hit by chance (e.g. a hallucinated phrase
    sharing one common word with some line) and is used only
    as a fallback when nothing better exists for that line.
+   If literally every line comes back unmatched, that's
+   grounds to suspect the tag is mislabeled rather than the
+   audio being hard to align - `has_speech` (silero-vad, via
+   `torch.hub`) is run on the same isolated audio as a second
+   opinion (`--no-vocal-check` to skip); no vocal activity
+   either → warn and leave the tag untouched instead of
+   writing an all-interpolated, meaningless LRC.
 5. `finalize_times`: `detect_onsets` runs
    `librosa.onset.onset_detect(backtrack=True)` on the same
    audio used for transcription; `snap_to_onsets` pulls each

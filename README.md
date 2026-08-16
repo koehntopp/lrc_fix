@@ -33,6 +33,12 @@ the waveform.
    but was only written once) and the edit takes effect next run. No backup
    is kept — if a run goes wrong, delete the tag and re-fetch lyrics (e.g.
    from [lrclib.net](https://lrclib.net)).
+6. **Sanity-check outliers** — if alignment finds *zero* matches for every
+   line (the given lyrics don't seem to be in the audio at all), that's run
+   back through [silero-vad](https://github.com/snakers4/silero-vad) as a
+   second opinion. No vocal activity detected either → the tag is probably
+   mislabeled; a warning is printed and the tag is left untouched rather
+   than writing an all-interpolated, meaningless LRC.
 
 ## Requirements
 
@@ -68,6 +74,10 @@ Or just clone the repo.
 
 # force language instead of relying on auto-detect
 ./lrc_fix.py song.flac --language en
+
+# scan a directory for files with no LYRICS tag at all: VAD-tag real
+# instrumentals, log the rest as needing lyrics fetched
+./lrc_fix.py ~/Music/some_album/ --find-missing-lyrics
 ```
 
 A file is skipped if it has no `LYRICS` tag, if the tag is empty after
@@ -97,13 +107,16 @@ always processes it. The tool logs `[i/N] <path>` as each file starts.
 | `--all` | off | Directory mode: also reprocess already-LRC-timestamped files |
 | `--no-isolate-vocals` | off | Skip demucs separation, transcribe the full mix |
 | `--no-snap-onsets` | off | Skip onset detection/snapping |
+| `--no-vocal-check` | off | Skip the VAD fallback when alignment finds zero matches |
+| `--find-missing-lyrics` | off | Scan for files with no `LYRICS` tag; VAD-tag instrumentals, log the rest |
 | `--dump-words` | off | Print the raw ASR word/timestamp transcript (debugging) |
 
 ## Notes
 
-- First run downloads whisperx/demucs model weights from Hugging Face Hub
-  and caches them (`~/.cache/torch`, `~/.cache/huggingface`) — later runs
-  are fast to start.
+- First run downloads whisperx/demucs model weights from Hugging Face Hub,
+  and silero-vad (only used for the VAD fallback / `--find-missing-lyrics`)
+  from GitHub via `torch.hub` — all cached (`~/.cache/torch`,
+  `~/.cache/huggingface`) so later runs are fast to start.
 - `--whisper-model large*` is rarely worth it here: since the correct
   lyrics text is already known, the alignment step only needs *usable*
   ASR output to match against, not maximally accurate transcription.
