@@ -87,8 +87,13 @@ demucs/whisperx when there's no lyric text to align.
 
 When `path` is a directory, files are found recursively (including
 subdirectories). By default, only files whose `LYRICS` tag is *not* already
-LRC-timestamped are processed — pass `--all` to reprocess already-timestamped
-files too. Files with no usable lyrics (missing tag, empty, or an
+LRC-timestamped are fully realigned — pass `--all` to reprocess
+already-timestamped files too. Already-LRC files aren't just skipped,
+though: their `[ar:]`/`[ti:]`/`[al:]`/`[re:]`/`[length:]` header lines still
+get checked and refreshed against the FLAC's own tags (a metadata-only pass,
+no demucs/whisperx), while the existing timestamped body — including a
+manually added marker like `[00:00.00](Spoken Intro)` — is left completely
+untouched. Files with no usable lyrics (missing tag, empty, or an
 instrumental placeholder) are excluded from the count regardless of `--all`,
 so the number reported up front matches what will actually run. This
 filtering doesn't apply when `path` is a single file: naming a file directly

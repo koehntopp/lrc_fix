@@ -81,14 +81,21 @@ more.
 `path` may be a single `.flac` file (always processed, no
 filtering) or a directory (searched recursively via
 `rglob`). In directory mode, files whose `LYRICS` tag is
-already LRC-timestamped are skipped by default - `--all`
-overrides. Files with no usable lyrics (no `LYRICS` tag,
-empty after parsing, or an instrumental placeholder) are
-also excluded up front regardless of `--all`, so the printed
-count matches what will actually run. The file list is
-filtered/counted up front and `main` logs `[i/N] <path>` per
-file so progress is visible before the (slow) per-file work
-starts.
+already LRC-timestamped are excluded from full realignment by
+default - `--all` overrides. They aren't fully skipped though:
+`main` routes them to `process_metadata_only_file`, which
+refreshes just the id-tag header via `ensure_id_tags`/
+`split_id_tags` and leaves the existing timestamped body
+byte-for-byte untouched (no demucs/whisperx). This exists
+because a manually added single-timestamp marker (e.g.
+`[00:00.00](Spoken Intro)`) makes `is_lrc()` true, so it would
+otherwise never get its metadata touched at all. Files with no
+usable lyrics (no `LYRICS` tag, empty after parsing, or an
+instrumental placeholder) are excluded from both passes
+regardless of `--all`, so the printed count matches what will
+actually run. The file list is filtered/counted up front and
+`main` logs `[i/N] <path>` per file so progress is visible
+before the (slow) per-file work starts.
 
 Per-file, `process_file` skips early (before demucs/whisperx
 run) on: no `LYRICS` tag, tag empty after parsing, or an

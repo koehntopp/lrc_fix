@@ -126,6 +126,27 @@ def strip_lyric_lines(raw: str) -> tuple[list[str], list[str]]:
     return id_tags, lines
 
 
+def split_id_tags(raw: str) -> tuple[list[str], list[str]]:
+    """Like strip_lyric_lines, but never touches timestamps on body lines.
+
+    Used for the metadata-only pass on files that are skipped for
+    realignment because they're already LRC-timestamped (e.g. a manually
+    added `[00:00.00](Spoken Intro)` marker) - the body must come back
+    byte-for-byte identical, only the id-tag header lines get refreshed.
+    """
+    id_tags = []
+    body = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if LRC_ID_TAG_RE.match(line):
+            id_tags.append(line)
+        else:
+            body.append(line)
+    return id_tags, body
+
+
 _STANDARD_ID_TAGS = [("ar", "ARTIST"), ("ti", "TITLE"), ("al", "ALBUM")]
 _ID_TAG_KEY_RE = re.compile(r"^\[([a-zA-Z]+):")
 
@@ -528,6 +549,31 @@ def process_missing_lyrics_file(path: Path, args: argparse.Namespace, index: int
     print(f"   {'would mark' if args.dry_run else 'marked'} as instrumental")
 
 
+def process_metadata_only_file(path: Path, args: argparse.Namespace, index: int, total: int) -> None:
+    """Refresh only the id-tag header lines on a file that's already
+    LRC-timestamped and therefore skipped for realignment. The existing
+    timestamped body (e.g. a manually added [00:00.00](Spoken Intro) line)
+    is left completely untouched - no demucs/whisperx involved.
+    """
+    print(f"== [{index}/{total}] {path} (metadata only)")
+    flac = FLAC(path)
+    raw = read_lyrics_tag(flac)
+    if not raw:
+        return
+
+    id_tags, body = split_id_tags(raw)
+    if not body:
+        return
+
+    id_tags = ensure_id_tags(id_tags, flac)
+    new_lrc = "\n".join([*id_tags, *body])
+    if new_lrc == raw:
+        print("   metadata already up to date, no change")
+        return
+    write_lyrics_tag(flac, new_lrc, args.dry_run)
+    print(f"   {'would update' if args.dry_run else 'updated'} metadata only")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("path", type=Path, help="FLAC file or directory to process")
@@ -586,7 +632,7 @@ def main() -> int:
 
     if args.path.is_dir():
         kept = []
-        skipped_lrc = 0
+        metadata_only = []
         skipped_no_lyrics = 0
         for f in files:
             try:
@@ -609,11 +655,22 @@ def main() -> int:
                 kept.append(f)
                 continue
             if not args.all and is_lrc(raw):
-                skipped_lrc += 1
+                # Already LRC-timestamped, so no realignment - but its id-tag
+                # header (ar/ti/al/re/length) can still be stale/incomplete
+                # (e.g. a manually added [00:00.00](Spoken Intro) marker never
+                # got the usual ensure_id_tags treatment). Fix that cheaply
+                # without touching the existing timestamped body.
+                metadata_only.append(f)
                 continue
             kept.append(f)
-        if skipped_lrc:
-            print(f"skipping {skipped_lrc} file(s) already LRC-timestamped (use --all to include them)")
+        if metadata_only:
+            print(f"{len(metadata_only)} file(s) already LRC-timestamped - "
+                  f"checking/refreshing metadata only (use --all to fully realign them instead)")
+            for i, path in enumerate(metadata_only, 1):
+                try:
+                    process_metadata_only_file(path, args, i, len(metadata_only))
+                except Exception as exc:
+                    print(f"   error: {exc}", file=sys.stderr)
         if skipped_no_lyrics:
             print(f"skipping {skipped_no_lyrics} file(s) with no usable lyrics")
         files = kept
