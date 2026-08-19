@@ -151,8 +151,16 @@ _STANDARD_ID_TAGS = [("ar", "ARTIST"), ("ti", "TITLE"), ("al", "ALBUM")]
 _ID_TAG_KEY_RE = re.compile(r"^\[([a-zA-Z]+):")
 
 # LRC spec's [re:] tag identifies the player/editor that created the file.
-# Always overwritten on write - it names the tool, not user-owned data.
+# Only stamped when a run actually changes lyric content - see
+# stamp_creator_tag / _strip_metadata_lines - never for a metadata-only
+# refresh, so it isn't rewritten (and doesn't force every file in a
+# directory to fail the idempotency check) just because ar/ti/al/length
+# needed correcting.
 CREATOR_TAG = "https://github.com/koehntopp/lrc_fix"
+
+# Keys ensure_id_tags manages directly, plus "re" (handled separately by
+# stamp_creator_tag/_strip_metadata_lines rather than here).
+_METADATA_KEYS = {"ar", "ti", "al", "length", "re"}
 
 
 def format_length_tag(seconds: float) -> str:
@@ -163,8 +171,10 @@ def format_length_tag(seconds: float) -> str:
 
 def ensure_id_tags(id_tags: list[str], flac: FLAC) -> list[str]:
     """Refresh [ar:]/[ti:]/[al:]/[length:] header lines from the FLAC's own
-    tags/audio duration, and stamp [re:CREATOR_TAG] to identify this tool as
-    the file's creator.
+    tags/audio duration. Every other pre-existing id tag line - including
+    [re:], [by:...], etc. - passes through unchanged, in original order.
+    [re:] is handled separately, by stamp_creator_tag, and only when a run
+    actually changes lyric content (see CLAUDE.md).
 
     ar/ti/al/length always prefer the FLAC's *current* value over whatever was
     already in the tag, so a value that's gone stale since it was last written
@@ -173,34 +183,76 @@ def ensure_id_tags(id_tags: list[str], flac: FLAC) -> list[str]:
     is used only as a fallback when the FLAC itself has nothing for that key
     (never regress to a blank header where something existed before). This
     matches discogs/update_lyrics.py's own header-refresh behavior exactly, so
-    that tool never needs to re-touch a file lrc_fix.py just wrote. Any
-    pre-existing [re:] line is replaced (it records which tool last touched
-    the file, not user data). Any other pre-existing id tag lines (e.g.
-    [by:...]) are kept, in their original order, after the standard ones.
+    that tool never needs to re-touch a file lrc_fix.py just wrote.
+
+    Original line order is preserved (values are substituted in place, not
+    rearranged into a fixed template) - a fixed output order would make any
+    tag not in that exact position (e.g. an existing [re:] line sitting
+    before [length:] rather than after it) look like a content change and
+    force a rewrite even when nothing actually changed.
     """
-    by_key = {}
-    others = []
+    standard = dict(_STANDARD_ID_TAGS)
+    present_keys = set()
+    result = []
     for line in id_tags:
         m = _ID_TAG_KEY_RE.match(line)
-        key = m.group(1).lower() if m else ""
-        if key in dict(_STANDARD_ID_TAGS) or key == "length":
-            by_key[key] = line
-        elif key != "re":
-            others.append(line)
+        key = m.group(1).lower() if m else None
+        if key in standard:
+            present_keys.add(key)
+            values = flac.get(standard[key])
+            result.append(f"[{key}:{values[0]}]" if values and values[0] else line)
+        elif key == "length":
+            present_keys.add("length")
+            length = getattr(flac.info, "length", None)
+            result.append(format_length_tag(length) if length else line)
+        else:
+            result.append(line)
 
-    result = []
     for key, vorbis_key in _STANDARD_ID_TAGS:
+        if key in present_keys:
+            continue
         values = flac.get(vorbis_key)
         if values and values[0]:
             result.append(f"[{key}:{values[0]}]")
-        elif key in by_key:
-            result.append(by_key[key])
-    result.append(f"[re:{CREATOR_TAG}]")
-    if getattr(flac.info, "length", None):
+    if "length" not in present_keys and getattr(flac.info, "length", None):
         result.append(format_length_tag(flac.info.length))
-    elif "length" in by_key:
-        result.append(by_key["length"])
-    result.extend(others)
+
+    return result
+
+
+_RE_TAG_KEY_RE = re.compile(r"^\[re:", re.IGNORECASE)
+
+
+def stamp_creator_tag(id_tags: list[str]) -> list[str]:
+    """Replace any existing [re:] line with the canonical CREATOR_TAG one.
+
+    Only call this when the run actually changed lyric content - see
+    _strip_metadata_lines and its use at each write site. Calling it
+    unconditionally would make [re:] flip on every metadata-only refresh,
+    which is exactly the churn this split is meant to avoid.
+    """
+    filtered = [line for line in id_tags if not _RE_TAG_KEY_RE.match(line)]
+    return [*filtered, f"[re:{CREATOR_TAG}]"]
+
+
+def _strip_metadata_lines(text: str) -> list[str]:
+    """Lines that aren't ar/ti/al/length/re - i.e. the actual lyric body,
+    plus any other id tags like [la:]/[instrumental:]/[by:...].
+
+    Comparing this before/after is how each write site decides whether a
+    run actually changed lyric content (and so [re:] should be (re)stamped)
+    versus just refreshed metadata (and so [re:] should be left alone).
+    """
+    result = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m = _ID_TAG_KEY_RE.match(line)
+        key = m.group(1).lower() if m else None
+        if key in _METADATA_KEYS:
+            continue
+        result.append(line)
     return result
 
 
@@ -471,6 +523,9 @@ def process_file(path: Path, args: argparse.Namespace, index: int, total: int) -
     if is_instrumental(lyric_lines):
         id_tags = ensure_id_tags(id_tags, flac)
         new_lrc = build_instrumental_lrc(id_tags)
+        if _strip_metadata_lines(new_lrc) != _strip_metadata_lines(raw):
+            id_tags = stamp_creator_tag(id_tags)
+            new_lrc = build_instrumental_lrc(id_tags)
         if new_lrc == raw:
             print("   already complete, no change")
             return
@@ -515,6 +570,9 @@ def process_file(path: Path, args: argparse.Namespace, index: int, total: int) -
     times = finalize_times(raw_times, onsets)
 
     new_lrc = build_lrc(id_tags, lyric_lines, times)
+    if _strip_metadata_lines(new_lrc) != _strip_metadata_lines(raw):
+        id_tags = stamp_creator_tag(id_tags)
+        new_lrc = build_lrc(id_tags, lyric_lines, times)
     if new_lrc == raw:
         print("   already up to date, no change")
         return
@@ -543,17 +601,22 @@ def process_missing_lyrics_file(path: Path, args: argparse.Namespace, index: int
         print(f"   Missing lyrics, not instrumental: {path}")
         return
 
-    id_tags = ensure_id_tags([], flac)
+    # No prior LYRICS tag to compare against - this is unconditionally new
+    # lyric content (from nothing to an instrumental marker), so stamp.
+    id_tags = stamp_creator_tag(ensure_id_tags([], flac))
     new_lrc = build_instrumental_lrc(id_tags)
     write_lyrics_tag(flac, new_lrc, args.dry_run)
     print(f"   {'would mark' if args.dry_run else 'marked'} as instrumental")
 
 
 def process_metadata_only_file(path: Path, args: argparse.Namespace, index: int, total: int) -> None:
-    """Refresh only the id-tag header lines on a file that's already
-    LRC-timestamped and therefore skipped for realignment. The existing
-    timestamped body (e.g. a manually added [00:00.00](Spoken Intro) line)
-    is left completely untouched - no demucs/whisperx involved.
+    """Refresh only the ar/ti/al/length id-tag header lines on a file that's
+    already LRC-timestamped and therefore skipped for realignment. [re:] is
+    left exactly as it was (ensure_id_tags no longer touches it - see
+    stamp_creator_tag) since this pass never changes lyric content. The
+    existing timestamped body (e.g. a manually added
+    [00:00.00](Spoken Intro) line) is left completely untouched - no
+    demucs/whisperx involved.
     """
     print(f"== [{index}/{total}] {path} (metadata only)")
     flac = FLAC(path)

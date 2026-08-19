@@ -110,12 +110,17 @@ through `process_missing_lyrics_file` instead of `process_file`.
 That isolates vocals (same demucs step, still respects
 `--no-isolate-vocals`) and runs `has_speech` alone, no
 transcription needed since there's no lyric text to align
-against. No speech found → write `LYRICS` as `Instrumental`
-(safe to auto-write here specifically because there's no
-existing lyric text at risk of being overwritten, unlike the
-`match_line_times` fallback above). Speech found → log
-`Missing lyrics, not instrumental: <path>` and leave the file
-untouched; a human still has to fetch the actual lyrics.
+against. No speech found → write the canonical instrumental
+marker via `build_instrumental_lrc` (`[la:zxx]`,
+`[instrumental:true]`, `[00:00.00](Instrumental)`), with `[re:]`
+unconditionally stamped since there's no prior `LYRICS` tag to
+compare against - this is by definition new lyric content, not
+a metadata refresh (safe to auto-write here specifically
+because there's no existing lyric text at risk of being
+overwritten, unlike the `match_line_times` fallback above).
+Speech found → log `Missing lyrics, not instrumental: <path>`
+and leave the file untouched; a human still has to fetch the
+actual lyrics.
 
 ### Pipeline
 1. Read the FLAC `LYRICS` vorbis comment (mutagen). Parse
@@ -124,11 +129,23 @@ untouched; a human still has to fetch the actual lyrics.
    `[mm:ss.xx]` timestamps on the rest are stripped since
    they get recomputed from audio regardless of whether the
    tag started as plain text or an existing LRC. `ensure_id_
-   tags` then fills in any of ar/ti/al missing from id_tags
-   using the file's own ARTIST/TITLE/ALBUM vorbis comments,
-   without touching keys already present, and always stamps
-   `[re:CREATOR_TAG]` (the tool's GitHub URL), replacing any
-   prior `[re:]` line since it names the tool, not user data.
+   tags` refreshes `ar`/`ti`/`al`/`length` from the FLAC's own
+   tags/duration (falling back to the existing header line only
+   when the FLAC itself has nothing for that key), substituting
+   values in place rather than reordering into a fixed template
+   - a fixed order would make an untouched `[re:]` sitting in a
+   different position than this run would generate look like a
+   content change and force a rewrite for nothing. `[re:]`
+   itself is left completely alone by `ensure_id_tags` - it's
+   stamped separately, by `stamp_creator_tag`, and only when
+   `_strip_metadata_lines(new) != _strip_metadata_lines(raw)`
+   (i.e. something other than ar/ti/al/length/re actually
+   differs - real lyric content, not metadata bookkeeping). A
+   metadata-only fix (e.g. correcting a stale `ARTIST` tag)
+   never touches `[re:]`, and a file whose metadata and lyrics
+   are both already correct comes back byte-identical to `raw`
+   and is skipped entirely - a stale `[re:]` value alone can no
+   longer force a directory-wide rewrite.
 2. `separate_vocals`: demucs (`--two-stems vocals`) isolates
    the vocal stem so whisper never sees instrumental-only
    audio — that's the main hallucination trigger. Default

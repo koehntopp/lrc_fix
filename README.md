@@ -89,9 +89,10 @@ When `path` is a directory, files are found recursively (including
 subdirectories). By default, only files whose `LYRICS` tag is *not* already
 LRC-timestamped are fully realigned — pass `--all` to reprocess
 already-timestamped files too. Already-LRC files aren't just skipped,
-though: their `[ar:]`/`[ti:]`/`[al:]`/`[re:]`/`[length:]` header lines still
-get checked and refreshed against the FLAC's own tags (a metadata-only pass,
-no demucs/whisperx), while the existing timestamped body — including a
+though: their `[ar:]`/`[ti:]`/`[al:]`/`[length:]` header lines still get
+checked and refreshed against the FLAC's own tags (a metadata-only pass,
+no demucs/whisperx; `[re:]` is left alone here — see below), while the
+existing timestamped body — including a
 manually added marker like `[00:00.00](Spoken Intro)` — is left completely
 untouched. Files with no usable lyrics (missing tag, empty, or an
 instrumental placeholder) are excluded from the count regardless of `--all`,
@@ -129,8 +130,14 @@ always processes it. The tool logs `[i/N] <path>` as each file starts.
   are preserved as-is and never timestamped. Any of the three that's
   missing gets filled in from the file's own `ARTIST`/`TITLE`/`ALBUM` tags
   (when set).
-- Every write stamps `[re:https://github.com/koehntopp/lrc_fix]` (the LRC
-  spec's "creator" tag), replacing any prior `[re:]` line.
+- `[re:https://github.com/koehntopp/lrc_fix]` (the LRC spec's "creator" tag)
+  only gets (re)stamped when a run actually changes lyric content — a
+  realignment, a completed instrumental marker, etc. A metadata-only refresh
+  (correcting `[ar:]`/`[ti:]`/`[al:]`/`[length:]`) leaves any existing
+  `[re:]` line exactly as it was. This also keeps files idempotent: a file
+  whose metadata and lyrics are both already correct compares equal to its
+  prior content and is left untouched entirely, rather than a stale `[re:]`
+  value alone forcing a rewrite on every run.
 
 ## License
 
