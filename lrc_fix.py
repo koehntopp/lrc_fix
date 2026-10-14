@@ -8,6 +8,7 @@
 #     "librosa",
 #     "torch>=2.4,<2.6",
 #     "torchaudio>=2.4,<2.6",
+#     "transformers<5",
 #     "numpy<2",
 # ]
 # ///

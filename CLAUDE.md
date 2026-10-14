@@ -216,6 +216,20 @@ actual lyrics.
   loading (used internally by whisperx's aligner). `requires
   -python <3.13` avoids uv resolving onto a Python new enough
   that this torch range has no wheels.
+- `transformers<5` is also load bearing, for the same kind of
+  reason: `transformers` 5.x calls `torch.accelerator.current_
+  accelerator()` unconditionally while importing
+  `Wav2Vec2ForCTC` (whisperx's aligner model), an API that
+  doesn't exist before torch 2.6 - so without this pin, uv
+  resolves onto whatever 5.x is newest and `transcribe_words`
+  fails with `ModuleNotFoundError: Could not import module
+  'Wav2Vec2ForCTC'`. Confirmed in a clean test venv that the
+  newest 4.x release (`4.57.6` as of writing) imports cleanly
+  against `torch==2.5.1`; several 5.x point releases tested
+  inconsistently broken/working against the same torch version
+  across reused venvs, which reads as rough edges in a very
+  recently released major version rather than something worth
+  chasing to a specific working 5.x pin.
 - Warnings from pyannote/lightning about model-version
   mismatches (`trained with pyannote.audio 0.0.1, yours is
   3.3.2` etc.) are expected noise from whisperx's pinned
